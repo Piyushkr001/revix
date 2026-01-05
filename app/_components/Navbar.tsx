@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import Image from "next/image";
+import axios from "axios";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 
@@ -20,7 +21,7 @@ import { Separator } from "@/components/ui/separator";
 import { ModeToggle } from "@/components/ModeToggle";
 
 // ✅ Clerk
-import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { SignedIn, SignedOut, UserButton, useAuth } from "@clerk/nextjs";
 
 const navLinks = [
   { name: "Home", href: "/" },
@@ -29,9 +30,72 @@ const navLinks = [
   { name: "Contact", href: "/contact" },
 ];
 
+type DbUser = {
+  id: string;
+  email: string;
+  name: string | null;
+  imageUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export default function Navbar() {
   const pathname = usePathname();
   const [open, setOpen] = React.useState(false);
+
+  // ✅ mount guard to prevent hydration mismatch (Radix IDs)
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
+
+  // ✅ Clerk auth (FIX: include isLoaded)
+  const { isLoaded, isSignedIn } = useAuth();
+
+  const [dbUser, setDbUser] = React.useState<DbUser | null>(null);
+  const [syncing, setSyncing] = React.useState(false);
+
+  // ✅ Axios instance (same-origin cookie auth)
+  const api = React.useMemo(() => {
+    return axios.create({
+      baseURL: "",
+      withCredentials: true,
+    });
+  }, []);
+
+  // ✅ Sync user to DB only when Clerk is loaded AND user is signed in
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function syncUserToDb() {
+      try {
+        setSyncing(true);
+
+        // ✅ IMPORTANT: no Authorization header needed; Clerk uses cookies
+        const { data } = await api.get<{ user: DbUser }>("/api/users/me");
+
+        if (!cancelled) setDbUser(data.user);
+      } catch (err) {
+        console.error("Failed to sync user:", err);
+        if (!cancelled) setDbUser(null);
+      } finally {
+        if (!cancelled) setSyncing(false);
+      }
+    }
+
+    // ✅ FIX: do nothing until Clerk finishes loading
+    if (!isLoaded) return;
+
+    // ✅ If user is not signed in, clear cached DB user and exit
+    if (!isSignedIn) {
+      setDbUser(null);
+      return;
+    }
+
+    syncUserToDb();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, isSignedIn, api]);
 
   return (
     <header
@@ -69,7 +133,9 @@ export default function Navbar() {
         <nav className="hidden items-center gap-1 md:flex">
           {navLinks.map((link) => {
             const active =
-              link.href === "/" ? pathname === "/" : pathname?.startsWith(link.href);
+              link.href === "/"
+                ? pathname === "/"
+                : pathname?.startsWith(link.href);
 
             return (
               <Link
@@ -91,9 +157,9 @@ export default function Navbar() {
 
         {/* Right: Desktop Actions */}
         <div className="hidden items-center gap-2 md:flex">
-          <ModeToggle />
+          {/* ✅ Render ModeToggle only after mount to avoid hydration mismatch */}
+          {mounted ? <ModeToggle /> : <div className="h-9 w-9" />}
 
-          {/* ✅ If Signed Out: show Login + Sign up */}
           <SignedOut>
             <Button asChild variant="ghost">
               <Link href="/sign-in">Login</Link>
@@ -103,21 +169,23 @@ export default function Navbar() {
             </Button>
           </SignedOut>
 
-          {/* ✅ If Signed In: hide Login/Sign up and show UserButton */}
           <SignedIn>
             <div className="flex items-center gap-2">
-              {/* Optional: Dashboard shortcut */}
               <Button asChild variant="ghost">
                 <Link href="/dashboard">Dashboard</Link>
               </Button>
+
+              {syncing ? (
+                <span className="hidden text-xs text-muted-foreground sm:inline">
+                  Syncing...
+                </span>
+              ) : null}
 
               <div className="rounded-full border border-border/60 bg-background/60 p-1 shadow-sm dark:shadow-black/20">
                 <UserButton
                   afterSignOutUrl="/"
                   appearance={{
-                    elements: {
-                      userButtonAvatarBox: "h-8 w-8",
-                    },
+                    elements: { userButtonAvatarBox: "h-8 w-8" },
                   }}
                 />
               </div>
@@ -125,11 +193,11 @@ export default function Navbar() {
           </SignedIn>
         </div>
 
-        {/* Mobile: Actions + Menu */}
+        {/* Mobile */}
         <div className="flex items-center gap-2 md:hidden">
-          <ModeToggle />
+          {/* ✅ Render ModeToggle only after mount to avoid hydration mismatch */}
+          {mounted ? <ModeToggle /> : <div className="h-9 w-9" />}
 
-          {/* ✅ On mobile: if SignedOut show Login, if SignedIn show UserButton */}
           <SignedOut>
             <Button asChild variant="ghost" size="sm">
               <Link href="/sign-in">Login</Link>
@@ -181,7 +249,9 @@ export default function Navbar() {
               <div className="mt-6 flex flex-col gap-2">
                 {navLinks.map((link) => {
                   const active =
-                    link.href === "/" ? pathname === "/" : pathname?.startsWith(link.href);
+                    link.href === "/"
+                      ? pathname === "/"
+                      : pathname?.startsWith(link.href);
 
                   return (
                     <Link
@@ -203,7 +273,6 @@ export default function Navbar() {
 
                 <Separator className="my-3" />
 
-                {/* ✅ Mobile Auth Buttons inside drawer */}
                 <SignedOut>
                   <Button
                     asChild
@@ -214,7 +283,11 @@ export default function Navbar() {
                     <Link href="/sign-in">Login</Link>
                   </Button>
 
-                  <Button asChild className="w-full" onClick={() => setOpen(false)}>
+                  <Button
+                    asChild
+                    className="w-full"
+                    onClick={() => setOpen(false)}
+                  >
                     <Link href="/sign-up">Sign up</Link>
                   </Button>
                 </SignedOut>
@@ -229,17 +302,11 @@ export default function Navbar() {
                     <Link href="/dashboard">Go to Dashboard</Link>
                   </Button>
 
-                  {/* Optional: show user button in drawer too */}
-                  <div className="mt-1 flex justify-start">
-                    <div className="rounded-full border border-border/60 bg-background/60 p-1 shadow-sm dark:shadow-black/20">
-                      <UserButton
-                        afterSignOutUrl="/"
-                        appearance={{
-                          elements: { userButtonAvatarBox: "h-8 w-8" },
-                        }}
-                      />
-                    </div>
-                  </div>
+                  {dbUser?.email ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Signed in as {dbUser.email}
+                    </p>
+                  ) : null}
                 </SignedIn>
               </div>
             </SheetContent>
