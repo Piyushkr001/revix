@@ -169,3 +169,59 @@ export const notificationPrefs = pgTable(
     userUnique: uniqueIndex("notification_prefs_user_unique").on(t.userId),
   })
 );
+
+
+export const supportStatusEnum = pgEnum("support_status", [
+  "open",
+  "in_progress",
+  "resolved",
+  "closed",
+]);
+
+export const supportPriorityEnum = pgEnum("support_priority", [
+  "low",
+  "medium",
+  "high",
+  "urgent",
+]);
+
+export const supportTickets = pgTable(
+  "support_tickets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    subject: text("subject").notNull(),
+    category: text("category").notNull().default("general"), // billing|technical|account|feedback|general
+    priority: supportPriorityEnum("priority").notNull().default("medium"),
+    status: supportStatusEnum("status").notNull().default("open"),
+
+    message: text("message").notNull(),
+
+    // Optional: store context useful for debugging
+    meta: jsonb("meta")
+      .$type<{
+        page?: string;
+        userAgent?: string;
+        appVersion?: string;
+      }>()
+      .default({}),
+
+    // If you want soft delete instead of hard delete
+    isDeleted: boolean("is_deleted").notNull().default(false),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("support_tickets_user_idx").on(t.userId),
+    userCreatedIdx: index("support_tickets_user_created_idx").on(t.userId, t.createdAt),
+    statusIdx: index("support_tickets_status_idx").on(t.status),
+  })
+);
+
+export type SupportTicket = typeof supportTickets.$inferSelect;
+export type NewSupportTicket = typeof supportTickets.$inferInsert;
