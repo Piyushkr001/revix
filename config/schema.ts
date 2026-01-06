@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, index, integer, jsonb, uuid, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, index, integer, jsonb, uuid, pgEnum, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const users = pgTable(
   "users",
@@ -166,5 +166,6 @@ export const notificationPrefs = pgTable(
   },
   (t) => ({
     userIdx: index("notification_prefs_user_idx").on(t.userId),
+    userUnique: uniqueIndex("notification_prefs_user_unique").on(t.userId),
   })
 );
